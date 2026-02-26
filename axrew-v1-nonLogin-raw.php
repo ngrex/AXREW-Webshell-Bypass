@@ -141,7 +141,7 @@ if(isset($_POST['action'])){
     }
 
     if($act=='spread'&&isset($_FILES['file'])&&isset($_POST['root'])){
-        // ── CUSTOM COUNT: ambil dari POST, default 5, max 50 ──
+        // ── CUSTOM COUNT
         $spreadCount = isset($_POST['count']) ? intval($_POST['count']) : 5;
         if($spreadCount < 1)  $spreadCount = 1;
         if($spreadCount > 50) $spreadCount = 50;
@@ -1196,7 +1196,7 @@ $('#spreadForm').on('submit', function(e){
   var root = $('#sp-root').val().trim();
   if(!root){ notify('Enter a root path','err'); return; }
 
-  // Ambil jumlah yang diminta
+  // take how many
   var countVal = parseInt($('#sp-count').val(), 10);
   if(isNaN(countVal)||countVal<1)  countVal=1;
   if(countVal>50) countVal=50;
@@ -1211,7 +1211,7 @@ $('#spreadForm').on('submit', function(e){
   fd.append('action','spread');
   fd.append('file', file);
   fd.append('root', root);
-  fd.append('count', countVal);   // ← kirim ke PHP
+  fd.append('count', countVal);   // ← send to php
 
   $.ajax({
     url: SELF, method: 'POST',
