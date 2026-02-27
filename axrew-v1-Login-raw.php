@@ -1,4 +1,4 @@
-gag<?php
+<?php
 header("X-XSS-Protection: 0");
 ob_start();
 set_time_limit(0);
